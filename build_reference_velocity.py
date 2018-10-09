@@ -1,7 +1,8 @@
 import cg
 from cg import glimpse
-from glimpse.imports import (datetime, np, os, shapely, re, matplotlib)
+from glimpse.imports import (datetime, np, os, shapely, re, matplotlib, scipy)
 import glob
+root = '/volumes/science-b/data/columbia'
 
 grid_step = (100, 100) # m
 
@@ -191,97 +192,156 @@ weights[dyears > 0] *= (1 - dyears[dyears > 0] / max(dyears))
 
 # ---- Compute summary statistics (cartesian) ----
 
+# w = glimpse.helpers.tile_axis(weights, vx.shape, axis=(0, 1))
+# vx_mean = glimpse.helpers.weighted_nanmean(vx, weights=w, axis=2)
+# vy_mean = glimpse.helpers.weighted_nanmean(vy, weights=w, axis=2)
+# vx_sigma = glimpse.helpers.weighted_nanstd(vx, weights=w, axis=2,
+#     means=vx_mean)
+# vy_sigma = glimpse.helpers.weighted_nanstd(vy, weights=w, axis=2,
+#     means=vy_mean)
+# # Compute orientations without Landsat and use for slow areas
+# mask = [key[1] != 'landsat' for key in velocity_keys]
+# w = glimpse.helpers.tile_axis(weights[mask], vx[..., mask].shape, axis=(0, 1))
+# vx_mean2 = glimpse.helpers.weighted_nanmean(vx[..., mask], weights=w, axis=2)
+# vy_mean2 = glimpse.helpers.weighted_nanmean(vy[..., mask], weights=w, axis=2)
+# vx_sigma2 = glimpse.helpers.weighted_nanstd(vx[..., mask], weights=w, axis=2,
+#     means=vx_mean2)
+# vy_sigma2 = glimpse.helpers.weighted_nanstd(vy[..., mask], weights=w, axis=2,
+#     means=vy_mean2)
+# vxy = np.hypot(vx_mean, vy_mean)
+# vxy2 = np.hypot(vx_mean2, vy_mean2)
+# vxy_ratio = vxy / vxy2
+# reorient = (vxy < 1) | (vxy2 < 1)
+# vx_mean[reorient] = vx_mean2[reorient] * vxy_ratio[reorient]
+# vy_mean[reorient] = vy_mean2[reorient] * vxy_ratio[reorient]
+# # Apply median filter
+# mask = ~np.isnan(vx_mean)
+# vx_mean = glimpse.helpers.median_filter(vx_mean, mask=mask, size=(3, 3))
+# vy_mean = glimpse.helpers.median_filter(vy_mean, mask=mask, size=(3, 3))
+# vx_sigma = glimpse.helpers.median_filter(vx_sigma, mask=mask, size=(3, 3))
+# vy_sigma = glimpse.helpers.median_filter(vy_sigma, mask=mask, size=(3, 3))
+#
+# # Plot results
+# speed_mean = np.hypot(vx_mean, vy_mean)
+# # speed_mean = np.hypot(vx_sigma, vy_sigma)
+# matplotlib.pyplot.figure()
+# glimpse.Raster(speed_mean, template.x, template.y).plot()
+# matplotlib.pyplot.colorbar()
+# mask = ~np.isnan(vx_mean)
+# matplotlib.pyplot.quiver(template.X[mask], template.Y[mask],
+#     100 * vx_mean[mask] / speed_mean[mask], 100 * vy_mean[mask] / speed_mean[mask],
+#     angles='xy', scale_units='xy', scale=1)
+# matplotlib.pyplot.gca().set_aspect(1)
+#
+# # Save to file
+# names = ('vx', 'vy', 'vx_stderr', 'vy_stderr')
+# Zs = (vx_mean, vy_mean, vx_sigma, vy_sigma)
+# for name, Z in zip(names, Zs):
+#     glimpse.Raster(Z, template.x, template.y).write(
+#         os.path.join('velocity', name + '.tif'), nan=-9999, crs=32606)
+
+# --- Convert to polar coordinates ----
+# NOTE: Assumes independent normally distributed vx and vy
+
+# cov = 0
+# speed_mean = np.hypot(vx_mean, vy_mean)
+# speed_sigma = np.sqrt(
+#     (vx_mean / speed_mean)**2 * vx_sigma**2 +
+#     (vy_mean / speed_mean)**2 * vy_sigma**2 +
+#     np.abs(2 * vx_mean * vy_mean * speed_mean**-2 * cov))
+# # Bootstrap orientations
+# n = 1000
+# u = np.expand_dims(vx_mean, 2) + np.expand_dims(vx_sigma, 2) * np.random.randn(vx_mean.shape[0], vx_mean.shape[1], n)
+# v = np.expand_dims(vy_mean, 2) + np.expand_dims(vy_sigma, 2) * np.random.randn(vy_mean.shape[0], vy_mean.shape[1], n)
+# thetas = np.arctan2(v, u)
+# thetas[thetas < 0] += 2 * np.pi
+# unit_vu = (
+#     np.sin(thetas).mean(axis=2),
+#     np.cos(thetas).mean(axis=2))
+# theta_mean = np.arctan2(*unit_vu)
+# theta_mean[theta_mean < 0] += 2 * np.pi
+# theta_sigma = np.sqrt(-2 * np.log(np.hypot(*unit_vu)))
+#
+# # Plot results
+# matplotlib.pyplot.figure()
+# glimpse.Raster(speed_mean, template.x, template.y).plot()
+# matplotlib.pyplot.colorbar()
+# matplotlib.pyplot.gca().set_aspect(1)
+# mask = ~np.isnan(vx_mean)
+# matplotlib.pyplot.quiver(template.X[mask], template.Y[mask],
+#     100 * vx_mean[mask] / speed_mean[mask], 100 * vy_mean[mask] / speed_mean[mask],
+#     angles='xy', scale_units='xy', scale=1)
+
+# ---- Compute summary statistics (cylindrical) ----
+
 w = glimpse.helpers.tile_axis(weights, vx.shape, axis=(0, 1))
-vx_mean = glimpse.helpers.weighted_nanmean(vx, weights=w, axis=2)
-vy_mean = glimpse.helpers.weighted_nanmean(vy, weights=w, axis=2)
-vx_sigma = glimpse.helpers.weighted_nanstd(vx, weights=w, axis=2,
-    means=vx_mean)
-vy_sigma = glimpse.helpers.weighted_nanstd(vy, weights=w, axis=2,
-    means=vy_mean)
-# Compute orientations without Landsat and use for slow areas
-mask = [key[1] != 'landsat' for key in velocity_keys]
-w = glimpse.helpers.tile_axis(weights[mask], vx[..., mask].shape, axis=(0, 1))
-vx_mean2 = glimpse.helpers.weighted_nanmean(vx[..., mask], weights=w, axis=2)
-vy_mean2 = glimpse.helpers.weighted_nanmean(vy[..., mask], weights=w, axis=2)
-vx_sigma2 = glimpse.helpers.weighted_nanstd(vx[..., mask], weights=w, axis=2,
-    means=vx_mean2)
-vy_sigma2 = glimpse.helpers.weighted_nanstd(vy[..., mask], weights=w, axis=2,
-    means=vy_mean2)
-vxy = np.hypot(vx_mean, vy_mean)
-vxy2 = np.hypot(vx_mean2, vy_mean2)
-vxy_ratio = vxy / vxy2
-reorient = (vxy < 1) | (vxy2 < 1)
-vx_mean[reorient] = vx_mean2[reorient] * vxy_ratio[reorient]
-vy_mean[reorient] = vy_mean2[reorient] * vxy_ratio[reorient]
-# Apply median filter
-mask = ~np.isnan(vx_mean)
-vx_mean = glimpse.helpers.median_filter(vx_mean, mask=mask, size=(3, 3))
-vy_mean = glimpse.helpers.median_filter(vy_mean, mask=mask, size=(3, 3))
-vx_sigma = glimpse.helpers.median_filter(vx_sigma, mask=mask, size=(3, 3))
-vy_sigma = glimpse.helpers.median_filter(vy_sigma, mask=mask, size=(3, 3))
 
-# ---- Plot results ----
-
-speed_mean = np.hypot(vx_mean, vy_mean)
-# speed_mean = np.hypot(vx_sigma, vy_sigma)
-matplotlib.pyplot.figure()
-glimpse.Raster(speed_mean, template.x, template.y).plot()
-matplotlib.pyplot.colorbar()
-mask = ~np.isnan(vx_mean)
-matplotlib.pyplot.quiver(template.X[mask], template.Y[mask],
-    100 * vx_mean[mask] / speed_mean[mask], 100 * vy_mean[mask] / speed_mean[mask],
-    angles='xy', scale_units='xy', scale=1)
-matplotlib.pyplot.gca().set_aspect(1)
-
-# Plot
-matplotlib.pyplot.figure()
-glimpse.Raster(np.hypot(vx_mean, vy_mean), template.x, template.y).plot()
-matplotlib.pyplot.colorbar()
-matplotlib.pyplot.plot(cg.Glacier()[:, 0], cg.Glacier()[:, 1])
-
-# ---- Save to file ----
-
-names = ('vx', 'vy', 'vx_stderr', 'vy_stderr')
-Zs = (vx_mean, vy_mean, vx_sigma, vy_sigma)
-for name, Z in zip(names, Zs):
-    glimpse.Raster(Z, template.x, template.y).write(
-        os.path.join('velocity', name + '.tif'), nan=-9999, crs=32606)
-
-# ---- Compute summary statistics (polar) ----
-
+# Radius (speed)
 speed = np.hypot(vx, vy)
-theta = np.arctan2(vy, vx)
-theta[theta < 0] += 2 * np.pi
-unit_xy = (
-    glimpse.helpers.weighted_nanmean(np.sin(theta), weights=w, axis=2),
-    glimpse.helpers.weighted_nanmean(np.cos(theta), weights=w, axis=2))
-theta_mean = np.arctan2(*unit_xy)
-theta_mean[theta_mean < 0] += 2 * np.pi
-theta_sigma = np.sqrt(-2 * np.log(np.hypot(*unit_xy)))
 speed_mean = glimpse.helpers.weighted_nanmean(speed, weights=w, axis=2)
 speed_sigma = glimpse.helpers.weighted_nanstd(speed, weights=w, axis=2,
     means=speed_mean)
-speed_min = np.nanmin(speed, axis=2)
-speed_max = np.nanmax(speed, axis=2)
 
-# ---- Plot results ----
+# Orientation (theta)
+theta = np.arctan2(vy, vx)
+theta[theta < 0] += 2 * np.pi
+unit_yx = (
+    glimpse.helpers.weighted_nanmean(np.sin(theta), weights=w, axis=2),
+    glimpse.helpers.weighted_nanmean(np.cos(theta), weights=w, axis=2))
+theta_mean = np.arctan2(*unit_yx)
+theta_mean[theta_mean < 0] += 2 * np.pi
+theta_sigma = np.sqrt(-2 * np.log(np.hypot(*unit_yx)))
 
-# Plot canonical directions
+# Compute orientations without Landsat and use for slow areas
+mask = [key[1] != 'landsat' for key in velocity_keys]
+w2 = glimpse.helpers.tile_axis(weights[mask], vx[..., mask].shape, axis=(0, 1))
+unit_yx2 = (
+    glimpse.helpers.weighted_nanmean(np.sin(theta[..., mask]), weights=w2, axis=2),
+    glimpse.helpers.weighted_nanmean(np.cos(theta[..., mask]), weights=w2, axis=2))
+theta_mean2 = np.arctan2(*unit_yx2)
+theta_mean2[theta_mean2 < 0] += 2 * np.pi
+theta_sigma2 = np.sqrt(-2 * np.log(np.hypot(*unit_yx2)))
+slow = speed_mean < 1
+theta_mean[slow] = theta_mean2[slow]
+theta_sigma[slow] = theta_sigma2[slow]
+
+# Apply median filters
+mask = ~np.isnan(speed_mean)
+speed_mean = glimpse.helpers.median_filter(speed_mean, mask=mask, size=(3, 3))
+speed_sigma = glimpse.helpers.median_filter(speed_sigma, mask=mask, size=(3, 3))
+
+def arc_distance_median(angles):
+    # https://github.com/scipy/scipy/issues/6644
+    mask = ~np.isnan(angles)
+    if mask.size and not mask.any():
+        return np.nan
+    distances = angles[np.newaxis, mask] - angles[mask, np.newaxis]
+    distances = (distances + np.pi) % (2 * np.pi) - np.pi
+    sum_distances = np.abs(distances).sum(axis=1)
+    return angles[mask][np.argmin(sum_distances)]
+
+theta_mean = scipy.ndimage.filters.generic_filter(theta_mean,
+    function=arc_distance_median, size=(3, 3))
+theta_mean[~mask] = np.nan
+theta_sigma = scipy.ndimage.filters.generic_filter(theta_sigma,
+    function=arc_distance_median, size=(3, 3))
+theta_sigma[~mask] = np.nan
+
+# Plot results
 matplotlib.pyplot.figure()
 glimpse.Raster(speed_mean, template.x, template.y).plot()
 matplotlib.pyplot.colorbar()
 matplotlib.pyplot.gca().set_aspect(1)
-mask = ~np.isnan(vx_mean)
+u = speed_mean * np.cos(theta_mean)
+v = speed_mean * np.sin(theta_mean)
+mask = ~np.isnan(u)
 matplotlib.pyplot.quiver(template.X[mask], template.Y[mask],
-    100 * vx_mean[mask] / speed_mean[mask], 100 * vy_mean[mask] / speed_mean[mask],
+    100 * u[mask] / speed_mean[mask], 100 * v[mask] / speed_mean[mask],
     angles='xy', scale_units='xy', scale=1)
 
-# Magnitudes (sigma)
-glimpse.Raster(speed_sigma, template.x, template.y).plot()
-matplotlib.pyplot.colorbar()
-matplotlib.pyplot.gca().set_aspect(1)
-
-# Orientation (sigma)
-glimpse.Raster(theta_sigma, template.x, template.y).plot()
-matplotlib.pyplot.colorbar()
-matplotlib.pyplot.gca().set_aspect(1)
+# Save to file
+names = ('vr', 'theta', 'vr_stderr', 'theta_stderr')
+Zs = (speed_mean, theta_mean, speed_sigma, theta_sigma)
+for name, Z in zip(names, Zs):
+    glimpse.Raster(Z, template.x, template.y).write(
+        os.path.join('velocity', name + '.tif'), nan=-9999, crs=32606)
