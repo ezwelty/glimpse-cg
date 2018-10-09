@@ -2,7 +2,7 @@ import cg
 from cg import glimpse
 from glimpse.imports import (datetime, np, os, shapely, re, matplotlib, scipy)
 import glob
-root = '/volumes/science-b/data/columbia'
+root = '/volumes/science/data/columbia'
 
 grid_step = (100, 100) # m
 

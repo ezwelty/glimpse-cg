@@ -23,6 +23,8 @@ min_dt = datetime.timedelta(days=1)
 min_observers = 1
 # Nominal Observer time span
 nominal_bin_dt = datetime.timedelta(days=3)
+# Forward shift between consecutive bins
+step_dt = datetime.timedelta(days=1)
 
 # ---- Compute station ranges ----
 # station_ranges, station_images, station_datetimes
@@ -215,28 +217,101 @@ dt_original = np.diff(original_coverage, axis=1).sum()
 dt = np.diff(coverage, axis=1).sum()
 print('Dropped coverage (total):', dt_original - dt)
 
-# ---- Build Observers ----
+# ---- Build Observers (adjacent bins) ----
+# Bins share images at their endpoints but do not overlap.
+
+# # Choose bin sizes that evenly divide each range and least deviate from ideal
+# # NOTE: Convert datetimes and timedeltas to float seconds to avoid ms rounding
+# coverageS = np.array([xi.timestamp() for xi in coverage.flat]).reshape(coverage.shape)
+# nominal_bin_dtS = nominal_bin_dt.total_seconds()
+# dts = np.diff(coverageS, axis=1).ravel()
+# nbins = dts / nominal_bin_dtS
+# nbins[nbins < 1] = 1
+# smaller = dts / np.ceil(nbins)
+# larger = dts / np.floor(nbins)
+# dsmaller = np.abs(smaller - nominal_bin_dtS)
+# dlarger = np.abs(larger - nominal_bin_dtS)
+# bin_dts = np.where(dsmaller < dlarger, smaller, larger)
+# nbins = np.where(dsmaller < dlarger, np.ceil(nbins), np.floor(nbins)).astype(int)
+# # Compute Observer ranges
+# observer_ranges = []
+# for r, dt, n in zip(coverageS, bin_dts, nbins):
+#     endpoints = [datetime.datetime.fromtimestamp(r[0] + ni * dt)
+#         for ni in range(n + 1)]
+#     ranges = np.column_stack((endpoints[:-1], endpoints[1:])).astype(datetime.datetime)
+#     observer_ranges.append(ranges)
+# # Build Observer image lists
+# observers = []
+# for i, ranges in enumerate(observer_ranges):
+#     temp_basenames = [dict() for _ in range(len(ranges))]
+#     for station in stations:
+#         crop = station_coverage[station][i]
+#         selected = ((crop[0] <= station_datetimes[station]) &
+#             (crop[1] >= station_datetimes[station]))
+#         if not np.any(selected):
+#             continue
+#         images = np.asarray(station_images[station])[selected]
+#         datetimes = np.asarray(station_datetimes[station])[selected]
+#         previous_last = None
+#         for j, r in enumerate(ranges):
+#             selected = (r[0] <= datetimes) & (r[1] >= datetimes)
+#             n = np.count_nonzero(selected)
+#             if (n + bool(previous_last)) < min_images:
+#                 if n:
+#                     previous_last = glimpse.helpers.strip_path(
+#                         images[selected][-1].path)
+#                 else:
+#                     previous_last = None
+#                 continue
+#             basenames = [glimpse.helpers.strip_path(img.path)
+#                 for img in images[selected]]
+#             if previous_last:
+#                 # HACK: Start with previous last image
+#                 basenames.insert(0, previous_last)
+#             temp_basenames[j][station] = basenames
+#             previous_last = basenames[-1]
+#     observers += temp_basenames
+# # Remove small Observers
+# for i, obs in enumerate(observers):
+#     n = len(obs)
+#     if n < min_observers:
+#         print('Dropped', i, '-', n, 'observers')
+#         _ = observers.pop(i)
+#     else:
+#         paths = np.concatenate(tuple(obs.values()))
+#         datetimes = [cg.parse_image_path(path)['datetime'] for path in paths]
+#         dt = np.max(datetimes) - np.min(datetimes)
+#         if dt < min_dt:
+#             print('Dropped', i, '-', dt, 'span')
+#             _ = observers.pop(i)
+# # Write to file
+# glimpse.helpers.write_json(observers, path='observers.json', indent=4,
+#     flat_arrays=True)
+
+# ---- Build Observers (rolling bins) ----
+# Bins are shifted forward by a fixed amount.
 
 # Choose bin sizes that evenly divide each range and least deviate from ideal
+# min | dt - (n - 1) step - nominal_bin_dt |
 # NOTE: Convert datetimes and timedeltas to float seconds to avoid ms rounding
-coverageS = np.array([xi.timestamp() for xi in coverage.flat]).reshape(coverage.shape)
+step_dtS = step_dt.total_seconds()
 nominal_bin_dtS = nominal_bin_dt.total_seconds()
-dts = np.diff(coverageS, axis=1).ravel()
-nbins = dts / nominal_bin_dtS
-nbins[nbins < 1] = 1
-smaller = dts / np.ceil(nbins)
-larger = dts / np.floor(nbins)
-dsmaller = np.abs(smaller - nominal_bin_dtS)
-dlarger = np.abs(larger - nominal_bin_dtS)
-bin_dts = np.where(dsmaller < dlarger, smaller, larger)
+coverageS = np.array([xi.timestamp() for xi in coverage.flat]).reshape(coverage.shape)
+dtS = np.diff(coverageS, axis=1).ravel()
+nbins = 1 + np.where(dtS > nominal_bin_dtS, (dtS - nominal_bin_dtS) / step_dtS, 0)
+dsmaller = np.abs(dtS - (np.ceil(nbins) - 1) * step_dtS - nominal_bin_dtS)
+dlarger = np.abs(dtS - (np.floor(nbins) - 1) * step_dtS - nominal_bin_dtS)
 nbins = np.where(dsmaller < dlarger, np.ceil(nbins), np.floor(nbins)).astype(int)
+bin_dtS = dtS - (nbins - 1) * step_dtS
+
 # Compute Observer ranges
 observer_ranges = []
-for r, dt, n in zip(coverageS, bin_dts, nbins):
-    endpoints = [datetime.datetime.fromtimestamp(r[0] + ni * dt)
-        for ni in range(n + 1)]
-    ranges = np.column_stack((endpoints[:-1], endpoints[1:])).astype(datetime.datetime)
+for r, dt, n in zip(coverageS, bin_dtS, nbins):
+    starts = np.array([r[0] + ni * step_dtS for ni in range(n)])
+    ranges = np.column_stack((starts, starts + dt))
+    ranges = np.vectorize(datetime.datetime.fromtimestamp)(ranges)
     observer_ranges.append(ranges)
+
 # Build Observer image lists
 observers = []
 for i, ranges in enumerate(observer_ranges):
@@ -249,25 +324,16 @@ for i, ranges in enumerate(observer_ranges):
             continue
         images = np.asarray(station_images[station])[selected]
         datetimes = np.asarray(station_datetimes[station])[selected]
-        previous_last = None
         for j, r in enumerate(ranges):
             selected = (r[0] <= datetimes) & (r[1] >= datetimes)
             n = np.count_nonzero(selected)
-            if (n + bool(previous_last)) < min_images:
-                if n:
-                    previous_last = glimpse.helpers.strip_path(
-                        images[selected][-1].path)
-                else:
-                    previous_last = None
+            if n < min_images:
                 continue
             basenames = [glimpse.helpers.strip_path(img.path)
                 for img in images[selected]]
-            if previous_last:
-                # HACK: Start with previous last image
-                basenames.insert(0, previous_last)
             temp_basenames[j][station] = basenames
-            previous_last = basenames[-1]
     observers += temp_basenames
+
 # Remove small Observers
 for i, obs in enumerate(observers):
     n = len(obs)
@@ -281,6 +347,7 @@ for i, obs in enumerate(observers):
         if dt < min_dt:
             print('Dropped', i, '-', dt, 'span')
             _ = observers.pop(i)
+
 # Write to file
 glimpse.helpers.write_json(observers, path='observers.json', indent=4,
     flat_arrays=True)
