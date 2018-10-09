@@ -44,6 +44,14 @@ vx, vx_sigma, vy, vy_sigma = [glimpse.Raster.read(
     os.path.join('velocity', name + '.tif'))
     for name in names]
 
+# ---- Load canonical velocities (cylindrical) ----
+# vr, vr_sigma, theta, theta_sigma
+
+names = 'vr', 'vr_stderr', 'theta', 'theta_stderr'
+vr, vr_sigma, theta, theta_sigma = [glimpse.Raster.read(
+    os.path.join('velocity', name + '.tif'))
+    for name in names]
+
 # ---- Load canonical bed ----
 # bed
 
@@ -121,6 +129,18 @@ for obs in range(len(start_images)):
     uvxy = unp.uarray(vxyz[:, 0:2], vxyz_sigma[:, 0:2])
     vxyz[:, 2], vxyz_sigma[:, 2] = (
         udz[:, 0] * uvxy[:, 0] + udz[:, 1] * uvxy[:, 1]).tuple()
+    # ---- Compute motion parameters (cylindrical) ----
+    n = len(xy)
+    # vrthz | vrthz_sigma
+    vrthz = np.ones((n, 3), dtype=float)
+    vrthz_sigma = np.ones((n, 3), dtype=float)
+    # (r, theta): Sample from velocity grids
+    vrthz[:, 0] = vr.sample(xy, order=0)
+    vrthz[:, 1] = theta.sample(xy, order=0)
+    vrthz_sigma[:, 0] = vr_sigma.sample(xy, order=0)
+    vrthz_sigma[:, 1] = theta_sigma.sample(xy, order=0)
+    # (z): Reuse cartesian results
+    vrthz[:, 2], vrthz_sigma[:, 2] = vxyz[:, 2], vxyz_sigma[:, 2]
     # ---- Determine probability of flotation ----
     # vz_sigma, az_sigma: Typically very small, but large if glacier floating
     zw = unp.uarray(16, 2) # m, mean HAE
@@ -133,13 +153,19 @@ for obs in range(len(start_images)):
     dh = hmax - hf
     flotation = scipy.stats.norm().cdf(-dh.mean / dh.sigma)
     # ---- Save parameters to file ----
+    basename = t.strftime('%Y%m%d') + '-' + str(obs) + '.pkl'
     # ids, xy, observer_mask
-    # vxyz, vxyz_sigma (based on long term statistics only)
     # flotation: Probability of flotation
+    # vxyz, vxyz_sigma (cartesian)
     glimpse.helpers.write_pickle(
-        dict(ids=ids, xy=xy, observer_mask=obsmask, vxyz=vxyz,
-        vxyz_sigma=vxyz_sigma, flotation=flotation),
-        path=os.path.join('points', t.strftime('%Y%m%d') + '-' + str(obs) + '.pkl'))
+        dict(ids=ids, xy=xy, observer_mask=obsmask, flotation=flotation,
+        vxyz=vxyz, vxyz_sigma=vxyz_sigma),
+        path=os.path.join('points-cartesian', basename))
+    # vrthz, vrthz_sigma (cylindrical)
+    glimpse.helpers.write_pickle(
+        dict(ids=ids, xy=xy, observer_mask=obsmask, flotation=flotation,
+        vrthz=vrthz, vrthz_sigma=vrthz_sigma),
+        path=os.path.join('points-cylindrical', basename))
 
 # ---- Plotting ----
 

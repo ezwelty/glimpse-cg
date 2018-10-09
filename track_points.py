@@ -14,6 +14,7 @@ os.environ['OMP_NUM_THREADS'] = '1'
 cg.IMAGE_PATH = '/volumes/science/data/columbia/timelapse' # Path to time-lapse images
 cg.FLAT_IMAGE_PATH = False # Whether path contains flat list of images
 parallel = 4 # Number of parallel processes, True = os.cpu_count(), False = disable parallel
+cylindrical = False
 
 # ---- Tracker heuristics ----
 # units: meters, days
@@ -21,15 +22,50 @@ parallel = 4 # Number of parallel processes, True = os.cpu_count(), False = disa
 n = 3550
 # xy = (pre-computed)
 xy_sigma = (2, 2)
-# vxyz = (pre-computed from mean long-term x, y velocities and DEM slope)
-# vxyz_sigma = (pre-computed from long-term x, y velocities and DEM slope)
-short_vxy_sigma = 0.25 # Additional short vxy_sigma, as fraction of long vxy_sigma
 flotation_vz_sigma = 3.5 # Multiplied by flotation probability
 min_vz_sigma = 0.2 # Minimum vz_sigma, applied after flotation_vz_sigma
-axy_sigma_scale = 0.75 # Fraction of final vxy_sigma
 flotation_az_sigma = 12 # Multiplied by flotation probability
 min_az_sigma = 0.2 # Minimum vz_sigma, applied after flotation_vz_sigma
 tile_size = (15, 15)
+
+# (cartesian)
+# vxyz = (pre-computed from mean long-term x, y velocities and DEM slope)
+# vxyz_sigma = (pre-computed from long-term x, y velocities and DEM slope)
+short_vxy_sigma = 0.25 # Additional short vxy_sigma, as fraction of long vxy_sigma
+axy_sigma_scale = 0.75 # Fraction of final vxy_sigma
+
+def compute_vxyz_sigma(vxyz_sigma, flotation):
+    return np.hstack((
+        vxyz_sigma[0:2] * (1 + short_vxy_sigma),
+        vxyz_sigma[2] + np.maximum(flotation * flotation_vz_sigma, min_vz_sigma)
+    ))
+
+def compute_axyz_sigma(vxyz_sigma, flotation):
+    return np.hstack((
+        vxyz_sigma[0:2] * axy_sigma_scale,
+        np.maximum(flotation * flotation_az_sigma, min_az_sigma)
+    ))
+
+# (cylindrical)
+# vrthz = (pre-computed from mean long-term velocities and DEM slope)
+# vrthz_sigma = (pre-computed from long-term velocities and DEM slope)
+short_vr_sigma = 0.25 # Additional short vr_sigma, as fraction of long vr_sigma
+ar_sigma_scale = 0.75 # Fraction of final vr_sigma
+dtheta_sigma = 0.05 # radians, change of theta per unit time
+
+def compute_vrthz_sigma(vrthz_sigma, flotation):
+    return np.hstack((
+        vrthz_sigma[0] * (1 + short_vr_sigma),
+        vrthz_sigma[1],
+        vrthz_sigma[2] + np.maximum(flotation * flotation_vz_sigma, min_vz_sigma)
+    ))
+
+def compute_arthz_sigma(vrthz_sigma, flotation):
+    return np.hstack((
+        vrthz_sigma[0] * ar_sigma_scale,
+        dtheta_sigma,
+        np.maximum(flotation * flotation_az_sigma, min_az_sigma)
+    ))
 
 # ---- Load observer list ----
 
@@ -43,7 +79,7 @@ dem_padding = 200 # m
 
 # ---- Track points ----
 
-for i_obs in np.arange(len(observer_json)):
+for i_obs in range(len(observer_json)):
     # ---- Load observers ----
     # observers
     observers = []
@@ -67,15 +103,21 @@ for i_obs in np.arange(len(observer_json)):
         observer = glimpse.Observer(images, cache=True, correction=True, sigma=0.3)
         observers.append(observer)
     # ---- Load track points ----
-    # ids, xy, observer_mask, vxyz, vxyz_sigma, flotation
     t = min([observer.datetimes[0] for observer in observers])
     datestr = t.strftime('%Y%m%d')
     basename = datestr + '-' + str(i_obs)
-    params = glimpse.helpers.read_pickle(os.path.join('points', basename + '.pkl'))
+    if cylindrical:
+        # ids, xy, observer_mask, vxyz, vxyz_sigma, flotation
+        params = glimpse.helpers.read_pickle(
+            os.path.join('points-cylindrical', basename + '.pkl'))
+    else:
+        # ids, xy, observer_mask, vrthz, vrthz_sigma, flotation
+        params = glimpse.helpers.read_pickle(
+            os.path.join('points-cartesian', basename + '.pkl'))
     # ---- Load DEM ----
     # dem, dem_sigma
     dem, dem_sigma = dem_interpolant(t, return_sigma=True)
-    # Crop DEM
+    # Crop DEM (for lower memory use)
     box = (glimpse.helpers.bounding_box(params['xy']) +
         np.array([-1, -1, 1, 1]) * dem_padding)
     dem.crop(xlim=box[0::2], ylim=box[1::2])
@@ -85,20 +127,27 @@ for i_obs in np.arange(len(observer_json)):
     # ---- Compute motion models ----
     # motion_models
     time_unit = datetime.timedelta(days=1)
-    motion_models = [glimpse.tracker.CartesianMotionModel(
-        n=n, dem=dem, dem_sigma=dem_sigma, time_unit=time_unit,
-        xy_sigma=xy_sigma, xy=params['xy'][i], vxyz=params['vxyz'][i],
-        vxyz_sigma=np.hstack((
-            params['vxyz_sigma'][i, 0:2] * (1 + short_vxy_sigma),
-            params['vxyz_sigma'][i, 2] +
-                np.maximum(params['flotation'][i] * flotation_vz_sigma, min_vz_sigma)
-            ))
-        ) for i in range(len(params['xy']))]
-    for i, model in enumerate(motion_models):
-        model.axyz_sigma = np.hstack((
-            model.vxyz_sigma[0:2] * axy_sigma_scale,
-            np.maximum(params['flotation'][i] * flotation_az_sigma, min_az_sigma)
-            ))
+    m = len(params['xy'])
+    if cylindrical:
+        vrthz_sigmas = [compute_vrthz_sigma(
+            params['vrthz_sigma'][i], params['flotation'][i]) for i in range(m)]
+        arthz_sigmas = [compute_arthz_sigma(
+            vrthz_sigmas[i], params['flotation'][i]) for i in range(m)]
+        motion_models = [glimpse.tracker.CylindricalMotionModel(
+            n=n, dem=dem, dem_sigma=dem_sigma, time_unit=time_unit,
+            xy_sigma=xy_sigma, xy=params['xy'][i], vrthz=params['vrthz'][i],
+            vrthz_sigma=vrthz_sigmas[i], arthz_sigma=arthz_sigmas[i])
+            for i in range(m)]
+    else:
+        vxyz_sigmas = [compute_vxyz_sigma(
+            params['vxyz_sigma'][i], params['flotation'][i]) for i in range(m)]
+        axyz_sigmas = [compute_axyz_sigma(
+            vxyz_sigmas[i], params['flotation'][i]) for i in range(m)]
+        motion_models = [glimpse.tracker.CartesianMotionModel(
+            n=n, dem=dem, dem_sigma=dem_sigma, time_unit=time_unit,
+            xy_sigma=xy_sigma, xy=params['xy'][i], vxyz=params['vxyz'][i],
+            vxyz_sigma=vxyz_sigmas[i], axyz_sigma=axyz_sigmas[i])
+            for i in range(m)]
     # ---- Track points ----
     # tracks, tracks_r
     tracker = glimpse.Tracker(observers=observers)
@@ -107,8 +156,14 @@ for i_obs in np.arange(len(observer_json)):
     suffixes = ('f', 'fv', 'r', 'rv')
     directions = (1, 1, -1, -1)
     tracks = [None] * len(suffixes)
-    paths = [os.path.join('tracks', basename + '-' + suffix + '.pkl')
-        for suffix in suffixes]
+    if cylindrical:
+        paths = [os.path.join(
+            'tracks-cylindrical', basename + '-' + suffix + '.pkl')
+            for suffix in suffixes]
+    else:
+        paths = [os.path.join(
+            'tracks-cartesian', basename + '-' + suffix + '.pkl')
+            for suffix in suffixes]
     is_file = [os.path.isfile(path) for path in paths]
     # Run forward and backward
     for i in (0, 2):
@@ -116,7 +171,7 @@ for i_obs in np.arange(len(observer_json)):
             print(basename + '-' + suffixes[i])
             tracks[i] = tracker.track(motion_models=motion_models,
                 observer_mask=params['observer_mask'], tile_size=tile_size,
-                parallel=False, datetimes=tracker.datetimes[::directions[i]])
+                parallel=parallel, datetimes=tracker.datetimes[::directions[i]])
         if not is_file[i + 1]:
             print(basename + '-' + suffixes[i + 1])
             if not tracks[i]:
@@ -126,13 +181,29 @@ for i_obs in np.arange(len(observer_json)):
             last_vxy = tracks[i].vxyz[mask, last, 0:2]
             last_vxy_sigma = tracks[i].vxyz_sigma[mask, last, 0:2]
             vxy_motion_models = [copy.copy(model) for model in motion_models]
-            for j, model in enumerate(np.array(vxy_motion_models)[mask]):
-                model.vxyz = np.hstack((last_vxy[j], model.vxyz[2]))
-                model.vxyz_sigma = np.hstack((last_vxy_sigma[j], model.vxyz_sigma[2]))
+            if cylindrical:
+                for j, model in enumerate(np.array(vxy_motion_models)[mask]):
+                    # Estimate cylindrical priors from cartesian results
+                    vxy = last_vxy[j] + last_vxy_sigma[j] * np.random.randn(100, 2)
+                    speed = np.hypot(vxy[:, 0], vxy[:, 1])
+                    vr, vr_sigma = speed.mean(), speed.std()
+                    thetas = np.arctan2(vxy[:, 1], vxy[:, 0])
+                    unit_yx = (
+                        np.sin(thetas).mean(),
+                        np.cos(thetas).mean())
+                    theta = np.arctan2(*unit_yx)
+                    theta_sigma = np.sqrt(-2 * np.log(np.hypot(*unit_yx)))
+                    model.vrthz = np.hstack((vr, theta, model.vrthz[2]))
+                    model.vrthz_sigma = np.hstack((vr_sigma, theta_sigma,
+                        model.vrthz_sigma[2]))
+            else:
+                for j, model in enumerate(np.array(vxy_motion_models)[mask]):
+                    model.vxyz = np.hstack((last_vxy[j], model.vxyz[2]))
+                    model.vxyz_sigma = np.hstack((last_vxy_sigma[j], model.vxyz_sigma[2]))
             # Repeat track
             tracks[i + 1] = tracker.track(motion_models=vxy_motion_models,
                 observer_mask=params['observer_mask'], tile_size=tile_size,
-                parallel=False, datetimes=tracker.datetimes[::directions[i + 1]])
+                parallel=parallel, datetimes=tracker.datetimes[::directions[i + 1]])
     # ---- Clean up tracks ----
     # Clean up tracker, since saved in Tracks.tracker
     tracker.reset()

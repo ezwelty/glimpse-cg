@@ -192,53 +192,53 @@ weights[dyears > 0] *= (1 - dyears[dyears > 0] / max(dyears))
 
 # ---- Compute summary statistics (cartesian) ----
 
-# w = glimpse.helpers.tile_axis(weights, vx.shape, axis=(0, 1))
-# vx_mean = glimpse.helpers.weighted_nanmean(vx, weights=w, axis=2)
-# vy_mean = glimpse.helpers.weighted_nanmean(vy, weights=w, axis=2)
-# vx_sigma = glimpse.helpers.weighted_nanstd(vx, weights=w, axis=2,
-#     means=vx_mean)
-# vy_sigma = glimpse.helpers.weighted_nanstd(vy, weights=w, axis=2,
-#     means=vy_mean)
-# # Compute orientations without Landsat and use for slow areas
-# mask = [key[1] != 'landsat' for key in velocity_keys]
-# w = glimpse.helpers.tile_axis(weights[mask], vx[..., mask].shape, axis=(0, 1))
-# vx_mean2 = glimpse.helpers.weighted_nanmean(vx[..., mask], weights=w, axis=2)
-# vy_mean2 = glimpse.helpers.weighted_nanmean(vy[..., mask], weights=w, axis=2)
-# vx_sigma2 = glimpse.helpers.weighted_nanstd(vx[..., mask], weights=w, axis=2,
-#     means=vx_mean2)
-# vy_sigma2 = glimpse.helpers.weighted_nanstd(vy[..., mask], weights=w, axis=2,
-#     means=vy_mean2)
-# vxy = np.hypot(vx_mean, vy_mean)
-# vxy2 = np.hypot(vx_mean2, vy_mean2)
-# vxy_ratio = vxy / vxy2
-# reorient = (vxy < 1) | (vxy2 < 1)
-# vx_mean[reorient] = vx_mean2[reorient] * vxy_ratio[reorient]
-# vy_mean[reorient] = vy_mean2[reorient] * vxy_ratio[reorient]
-# # Apply median filter
-# mask = ~np.isnan(vx_mean)
-# vx_mean = glimpse.helpers.median_filter(vx_mean, mask=mask, size=(3, 3))
-# vy_mean = glimpse.helpers.median_filter(vy_mean, mask=mask, size=(3, 3))
-# vx_sigma = glimpse.helpers.median_filter(vx_sigma, mask=mask, size=(3, 3))
-# vy_sigma = glimpse.helpers.median_filter(vy_sigma, mask=mask, size=(3, 3))
-#
-# # Plot results
-# speed_mean = np.hypot(vx_mean, vy_mean)
-# # speed_mean = np.hypot(vx_sigma, vy_sigma)
-# matplotlib.pyplot.figure()
-# glimpse.Raster(speed_mean, template.x, template.y).plot()
-# matplotlib.pyplot.colorbar()
-# mask = ~np.isnan(vx_mean)
-# matplotlib.pyplot.quiver(template.X[mask], template.Y[mask],
-#     100 * vx_mean[mask] / speed_mean[mask], 100 * vy_mean[mask] / speed_mean[mask],
-#     angles='xy', scale_units='xy', scale=1)
-# matplotlib.pyplot.gca().set_aspect(1)
-#
-# # Save to file
-# names = ('vx', 'vy', 'vx_stderr', 'vy_stderr')
-# Zs = (vx_mean, vy_mean, vx_sigma, vy_sigma)
-# for name, Z in zip(names, Zs):
-#     glimpse.Raster(Z, template.x, template.y).write(
-#         os.path.join('velocity', name + '.tif'), nan=-9999, crs=32606)
+w = glimpse.helpers.tile_axis(weights, vx.shape, axis=(0, 1))
+vx_mean = glimpse.helpers.weighted_nanmean(vx, weights=w, axis=2)
+vy_mean = glimpse.helpers.weighted_nanmean(vy, weights=w, axis=2)
+vx_sigma = glimpse.helpers.weighted_nanstd(vx, weights=w, axis=2,
+    means=vx_mean)
+vy_sigma = glimpse.helpers.weighted_nanstd(vy, weights=w, axis=2,
+    means=vy_mean)
+# Compute orientations without Landsat and use for slow areas
+mask = [key[1] != 'landsat' for key in velocity_keys]
+w = glimpse.helpers.tile_axis(weights[mask], vx[..., mask].shape, axis=(0, 1))
+vx_mean2 = glimpse.helpers.weighted_nanmean(vx[..., mask], weights=w, axis=2)
+vy_mean2 = glimpse.helpers.weighted_nanmean(vy[..., mask], weights=w, axis=2)
+vx_sigma2 = glimpse.helpers.weighted_nanstd(vx[..., mask], weights=w, axis=2,
+    means=vx_mean2)
+vy_sigma2 = glimpse.helpers.weighted_nanstd(vy[..., mask], weights=w, axis=2,
+    means=vy_mean2)
+vxy = np.hypot(vx_mean, vy_mean)
+vxy2 = np.hypot(vx_mean2, vy_mean2)
+vxy_ratio = vxy / vxy2
+reorient = (vxy < 1) | (vxy2 < 1)
+vx_mean[reorient] = vx_mean2[reorient] * vxy_ratio[reorient]
+vy_mean[reorient] = vy_mean2[reorient] * vxy_ratio[reorient]
+# Apply median filter
+mask = ~np.isnan(vx_mean)
+vx_mean = glimpse.helpers.median_filter(vx_mean, mask=mask, size=(3, 3))
+vy_mean = glimpse.helpers.median_filter(vy_mean, mask=mask, size=(3, 3))
+vx_sigma = glimpse.helpers.median_filter(vx_sigma, mask=mask, size=(3, 3))
+vy_sigma = glimpse.helpers.median_filter(vy_sigma, mask=mask, size=(3, 3))
+
+# Plot results
+speed_mean = np.hypot(vx_mean, vy_mean)
+# speed_mean = np.hypot(vx_sigma, vy_sigma)
+matplotlib.pyplot.figure()
+glimpse.Raster(speed_mean, template.x, template.y).plot()
+matplotlib.pyplot.colorbar()
+mask = ~np.isnan(vx_mean)
+matplotlib.pyplot.quiver(template.X[mask], template.Y[mask],
+    100 * vx_mean[mask] / speed_mean[mask], 100 * vy_mean[mask] / speed_mean[mask],
+    angles='xy', scale_units='xy', scale=1)
+matplotlib.pyplot.gca().set_aspect(1)
+
+# Save to file
+names = ('vx', 'vy', 'vx_stderr', 'vy_stderr')
+Zs = (vx_mean, vy_mean, vx_sigma, vy_sigma)
+for name, Z in zip(names, Zs):
+    glimpse.Raster(Z, template.x, template.y).write(
+        os.path.join('velocity', name + '.tif'), nan=-9999, crs=32606)
 
 # --- Convert to polar coordinates ----
 # NOTE: Assumes independent normally distributed vx and vy
