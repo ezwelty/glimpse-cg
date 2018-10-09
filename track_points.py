@@ -37,13 +37,9 @@ observer_json = glimpse.helpers.read_json('observers.json',
     object_pairs_hook=collections.OrderedDict)
 
 # ---- Load DEM interpolant ----
-# Checks for `dems/` (<datestr>-<obs>[_stderr].tif), then `dem_interpolant.pkl`
 
-if os.path.isdir('dems'):
-    dem_interpolant = None
-else:
-    dem_interpolant = glimpse.helpers.read_pickle('dem_interpolant.pkl')
-    dem_padding = 200 # m
+dem_interpolant = glimpse.helpers.read_pickle('dem_interpolant.pkl')
+dem_padding = 200 # m
 
 # ---- Track points ----
 
@@ -78,18 +74,14 @@ for i_obs in np.arange(len(observer_json)):
     params = glimpse.helpers.read_pickle(os.path.join('points', basename + '.pkl'))
     # ---- Load DEM ----
     # dem, dem_sigma
-    if dem_interpolant is None:
-        dem = glimpse.Raster.read(os.path.join('dems', basename + '.tif'))
-        dem_sigma = glimpse.Raster.read(os.path.join('dems', basename + '_stderr.tif'))
-    else:
-        dem, dem_sigma = dem_interpolant(t, return_sigma=True)
-        # Crop DEM
-        box = (glimpse.helpers.bounding_box(params['xy']) +
-            np.array([-1, -1, 1, 1]) * dem_padding)
-        dem.crop(xlim=box[0::2], ylim=box[1::2])
-        dem_sigma.crop(xlim=box[0::2], ylim=box[1::2])
-        dem.crop_to_data()
-        dem_sigma.crop_to_data()
+    dem, dem_sigma = dem_interpolant(t, return_sigma=True)
+    # Crop DEM
+    box = (glimpse.helpers.bounding_box(params['xy']) +
+        np.array([-1, -1, 1, 1]) * dem_padding)
+    dem.crop(xlim=box[0::2], ylim=box[1::2])
+    dem_sigma.crop(xlim=box[0::2], ylim=box[1::2])
+    dem.crop_to_data()
+    dem_sigma.crop_to_data()
     # ---- Compute motion models ----
     # motion_models
     time_unit = datetime.timedelta(days=1)
