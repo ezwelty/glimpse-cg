@@ -444,7 +444,7 @@ def tide_height(t):
         format='json',
         units='metric',
         time_zone='gmt',
-        datum='MLLW',
+        datum='MSL',
         product='hourly_height',
         station=9454240, # Valdez
         begin_date=t_begin.strftime('%Y%m%d %H:%M'),

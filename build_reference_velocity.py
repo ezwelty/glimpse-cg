@@ -240,7 +240,7 @@ for name, Z in zip(names, Zs):
     glimpse.Raster(Z, template.x, template.y).write(
         os.path.join('velocity', name + '.tif'), nan=-9999, crs=32606)
 
-# --- Convert to polar coordinates ----
+# ---- Convert to polar coordinates ----
 # NOTE: Assumes independent normally distributed vx and vy
 
 # cov = 0

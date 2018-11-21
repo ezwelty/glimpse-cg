@@ -2,8 +2,10 @@ import cg
 from cg import glimpse
 from glimpse.imports import (np, os, matplotlib, collections, datetime)
 import glob
+root = cg.CG_PATH
 
-observer_json = glimpse.helpers.read_json('observers.json',
+observer_json = glimpse.helpers.read_json(
+    os.path.join(root, 'observers.json'),
     object_pairs_hook=collections.OrderedDict)
 template = glimpse.Raster.read(os.path.join('points', 'template.tif'))
 
@@ -14,7 +16,7 @@ def tracks_basename(i):
 
 def tracks_path(i, suffixes=None):
     basename = tracks_basename(i)
-    basepath = os.path.join('tracks', basename)
+    basepath = os.path.join(root, 'tracks', basename)
     if suffixes is not None:
         return [basepath + '-' + suffix + '.pkl' for suffix in suffixes]
     else:
@@ -66,6 +68,29 @@ def normal_weighted_mean(means, sigmas, axis=None, correlated=False):
             range(2, weights.shape[axis]), axis), axis=axis) + 2 * ab
     return wmeans, np.sqrt(variances)
 
+def normal_mixture(means, sigmas, axis=None):
+    # https://en.wikipedia.org/wiki/Mixture_distribution#Moments
+    isnan_mean = np.isnan(means)
+    isnan_sigmas = np.isnan(sigmas)
+    if (isnan_mean != isnan_sigmas).any():
+        raise ValueError('mean and sigma NaNs do not match')
+    if (sigmas == 0).any():
+        raise ValueError('sigmas cannot be 0')
+    weights = sigmas**-2
+    weights *= 1 / np.nansum(weights, axis=axis, keepdims=True)
+    wmeans = np.nansum(weights * means, axis=axis, keepdims=True)
+    isnan = isnan_mean.all(axis=axis, keepdims=True)
+    wmeans[isnan] = np.nan
+    variances = np.nansum(weights * (means**2 + sigmas**2), axis=axis, keepdims=True) - wmeans**2
+    variances[isnan] = np.nan
+    return np.squeeze(wmeans, axis=axis), np.squeeze(np.sqrt(variances), axis=axis)
+
+# means = np.array((1, 1, 1))
+# sigmas = np.array((.1, .1, .1))
+# weights = np.array((1/3, 1/3, 1/3))
+# normal_mixture(np.atleast_2d(means).T, np.atleast_2d(sigmas).T, axis=0)
+# normal_weighted_mean(np.atleast_2d(means).T, np.atleast_2d(sigmas).T, axis=0)
+
 # ---- Check coverage ----
 
 for i in range(len(observer_json)):
@@ -79,7 +104,7 @@ for i in range(len(observer_json)):
 
 for i_obs in range(len(observer_json)):
     basename = tracks_basename(i_obs)
-    basepath = os.path.join('tracks', basename)
+    basepath = os.path.join(root, 'tracks', basename)
     if os.path.isfile(basename + '.pkl'):
         continue
     suffixes = ('f', 'fv', 'r', 'rv')
@@ -107,19 +132,25 @@ for i_obs in range(len(observer_json)):
     # Combine (merged) reverse runs (opposite directions)
     # Shift position of reverse run to the same start as forward run
     i = 0
-    mask, first, last = tracks[i].endpoints()
-    m = tracks[i].xyz.shape[1]
-    dxyz = tracks[i].xyz[mask, first, :] - tracks[i + 2].xyz[mask, last, :]
-    tracks[i + 2].xyz[mask, :, :] += np.tile(
-        np.expand_dims(dxyz, axis=1), reps=(1, m, 1))
+    # HACK: Skip for now
+    # mask, first, last = tracks[i].endpoints()
+    # m = tracks[i].xyz.shape[1]
+    # dxyz = tracks[i].xyz[mask, first, :] - tracks[i + 2].xyz[mask, last, :]
+    # tracks[i + 2].xyz[mask, :, :] += np.tile(
+    #     np.expand_dims(dxyz, axis=1), reps=(1, m, 1))
     # Take weighted mean (1 / variance) at each timestep assuming covariance = 1
     # (for each variable)
-    tracks[i].means, tracks[i].sigmas = normal_weighted_mean(
+    # tracks[i].means, tracks[i].sigmas = normal_weighted_mean(
+    #     means=np.stack((tracks[i].means, tracks[i + 2].means[:, ::-1, :]), axis=3),
+    #     sigmas=np.stack((tracks[i].sigmas, tracks[i + 2].sigmas[:, ::-1, :]), axis=3),
+    #     axis=3, correlated=True)
+    tracks[i].means, tracks[i].sigmas = normal_mixture(
         means=np.stack((tracks[i].means, tracks[i + 2].means[:, ::-1, :]), axis=3),
         sigmas=np.stack((tracks[i].sigmas, tracks[i + 2].sigmas[:, ::-1, :]), axis=3),
-        axis=3, correlated=True)
+        axis=3)
     # Write to file
-    glimpse.helpers.write_pickle(tracks[0], basepath + '.pkl')
+    glimpse.helpers.write_pickle(tracks[0],
+        os.path.join(root, 'tracks', basename + '.pkl'))
 
 # ---- Merge tracks into continuous arrays -----
 
@@ -195,9 +226,12 @@ for i_obs in range(len(paths)):
         tsigmas[:, singles] = tracks.vxyz_sigma[:, tbreaks[:-1][singles]]
         for i in np.where(dbreaks > 1)[0]:
             idx = slice(tbreaks[i], tbreaks[i + 1])
-            tmeans[:, i], tsigmas[:, i] = normal_weighted_mean(
+            # tmeans[:, i], tsigmas[:, i] = normal_weighted_mean(
+            #     means=tracks.vxyz[:, idx], sigmas=tracks.vxyz_sigma[:, idx],
+            #     axis=1, correlated=True)
+            tmeans[:, i], tsigmas[:, i] = normal_mixture(
                 means=tracks.vxyz[:, idx], sigmas=tracks.vxyz_sigma[:, idx],
-                axis=1, correlated=True)
+                axis=1)
     else:
         tmeans = tracks.vxyz
         tsigmas = tracks.vxyz_sigma
@@ -208,10 +242,14 @@ for i_obs in range(len(paths)):
     # Take weighted mean at overlaps
     overlap = ~np.isnan(means[indices]) & ~np.isnan(tmeans)
     if np.any(overlap):
-        m, s = normal_weighted_mean(
+        # m, s = normal_weighted_mean(
+        #     np.dstack((means[indices][overlap], tmeans[overlap])),
+        #     np.dstack((sigmas[indices][overlap], tsigmas[overlap])),
+        #     axis=2, correlated=True)
+        m, s = normal_mixture(
             np.dstack((means[indices][overlap], tmeans[overlap])),
             np.dstack((sigmas[indices][overlap], tsigmas[overlap])),
-            axis=2, correlated=True)
+            axis=2)
         tmeans[overlap], tsigmas[overlap] = m.ravel(), s.ravel()
     # Merge into giant arrays
     means[indices] = tmeans
@@ -275,6 +313,19 @@ glimpse.helpers.write_pickle(flotation, os.path.join(outdir, 'flotation.pkl'))
 
 # ---- Collapse tracks ----
 
+# Load tracks to process
+paths = glob.glob(os.path.join('tracks', '*[0-9].pkl'))
+
+# Load unique point ids
+point_paths = glob.glob(os.path.join('points', '*.pkl'))
+ids = None
+for path in point_paths:
+    points = glimpse.helpers.read_pickle(path)
+    if ids is None:
+        ids = points['ids']
+    else:
+        ids = np.unique(np.concatenate((ids, points['ids'])))
+
 # Initialize arrays
 idx = range(1067)
 midtimes = []
@@ -299,8 +350,10 @@ for i_obs in idx:
     #     np.concatenate(([datetime.timedelta(0)], dt)),
     #     np.concatenate((dt, [datetime.timedelta(0)])))).sum(axis=1)
     # time /= width.sum()
-    m, s = normal_weighted_mean(tracks.vxyz, tracks.vxyz_sigma,
-        axis=1, correlated=True)
+    # m, s = normal_weighted_mean(tracks.vxyz, tracks.vxyz_sigma,
+    #     axis=1, correlated=True)
+    m, s = normal_mixture(tracks.vxyz, tracks.vxyz_sigma,
+        axis=1)
     point_idx = np.searchsorted(ids, points['ids'])
     cmeans[point_idx, i_obs] = m
     csigmas[point_idx, i_obs] = s
@@ -333,7 +386,9 @@ for id in ids:
     fcsigmas[i, ~isnan] = csigmas[idx][idxi, I, J][~isnan]
 
 # Save to file
-outdir = 'tracks-arrays-sm'
+outdir = os.path.join(root, 'tracks-arrays-sm')
+xy = glimpse.helpers.grid_to_points((template.X, template.Y))[ids]
+xyi = np.column_stack((xy, ids))
 glimpse.helpers.write_pickle(xyi, os.path.join(outdir, 'xyi.pkl'))
 np.savetxt(
     fname=os.path.join(outdir, 'xyi.csv'), X=xyi,
