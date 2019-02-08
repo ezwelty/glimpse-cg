@@ -292,7 +292,7 @@
 			"viewdir": [90.5, -8, 0],
 			"notes": "Position estimated from control and parallax in synthetic images.",
 			"breaks": [{
-				"start": "AKJNC_20120825_234000",
+				"start": "AKJNC_20120825_234035",
 				"viewdir": [90, -7.5, -1],
 				"notes": "service, small"
 			}]
