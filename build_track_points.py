@@ -75,7 +75,8 @@ track_ids = np.ravel_multi_index(np.nonzero(mask), track_template.shape)
 # Write to file
 track_template.Z &= mask
 track_template.Z = track_template.Z.astype(np.uint8)
-track_template.write(os.path.join('points', 'template.tif'), crs=32606)
+track_template.write(os.path.join('points-cartesian', 'template.tif'), crs=32606)
+track_template.write(os.path.join('points-cylindrical', 'template.tif'), crs=32606)
 
 # ---- For each observer ----
 
