@@ -11,10 +11,10 @@ os.environ['OMP_NUM_THREADS'] = '1'
 
 # ---- Environment ----
 
-cg.IMAGE_PATH = '/volumes/science/data/columbia/timelapse' # Path to time-lapse images
+cg.IMAGE_PATH = '/data/brinkerhoff/glimpse_data/timelapse' # Path to time-lapse images
 cg.FLAT_IMAGE_PATH = False # Whether path contains flat list of images
-parallel = 4 # Number of parallel processes, True = os.cpu_count(), False = disable parallel
-cylindrical = False
+parallel = 32 # Number of parallel processes, True = os.cpu_count(), False = disable parallel
+cylindrical = True
 
 # ---- Tracker heuristics ----
 # units: meters, days
@@ -78,8 +78,8 @@ dem_interpolant = glimpse.helpers.read_pickle('dem_interpolant.pkl')
 dem_padding = 200 # m
 
 # ---- Track points ----
-
-for i_obs in range(len(observer_json)):
+start_index = 0
+for i_obs in range(len(observer_json))[start_index:]:
     # ---- Load observers ----
     # observers
     observers = []
