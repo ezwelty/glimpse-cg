@@ -870,6 +870,15 @@ def Coast():
     geo = glimpse.helpers.read_geojson(path, crs=32606, key='id')
     return {key: geo['features'][key]['geometry']['coordinates'] for key in geo['features']}
 
+@lru_cache(maxsize=1)
+def Forebay():
+    """
+    Return the forebay polygon.
+    """
+    path = os.path.join(CG_PATH, 'geojson', 'forebay.geojson')
+    geo = glimpse.helpers.read_geojson(path, crs=32606)
+    return geo['features'][0]['geometry']['coordinates'][0]
+
 def parse_dem_path(path):
     """
     Return datetime and type from DEM path.
@@ -962,6 +971,15 @@ def load_glacier_polygon(t, demtype=None):
         line = get_nearest_terminus(t)
     cline = clip_terminus_with_coast(line)
     return clip_glacier_with_terminus(cline)
+
+def load_forebay_polygon(glacier):
+    """
+    Return the forebay extent for a given glacier extent.
+    """
+    gpoly = shapely.geometry.Polygon(shell=glacier)
+    fpoly = shapely.geometry.Polygon(shell=Forebay())
+    diff = fpoly.difference(gpoly)
+    return np.asarray(diff.exterior.coords)
 
 def intersect_polygons(polygons):
     """
