@@ -7,7 +7,11 @@ cg.IMAGE_PATH = os.path.join(root, 'timelapse')
 surface_sigma = 3 # m, surface roughness
 grid_size = 20 # m
 zlim = (1, np.inf) # m
-fill_crevasses_args = dict(mask=lambda x: ~np.isnan(x), fill=True)
+fill_crevasses_args = dict(
+    maximum=dict(size=5), # 100 m
+    gaussian=dict(sigma=5), # 100 m (68%)
+    mask=lambda x: ~np.isnan(x),
+    fill=True)
 max_distance = 10e3 # m
 
 # ---- Build DEM template ----
@@ -104,10 +108,16 @@ for datestr, demtype in dem_keys:
     dem.crop(zlim=zlim)
     z = dem.sample(dem_points, order=1, bounds_error=False).reshape(dem_template.shape)
     dem = glimpse.Raster(z, x=dem_template.xlim, y=dem_template.ylim, datetime=t)
-    dem.fill_crevasses(**fill_crevasses_args)
     # Cache dem type and glacier polygon
     dem.type = demtype
     dem.polygon = cg.load_glacier_polygon(t=dem.datetime, demtype=dem.type)
+    # Mask forebay
+    forebay = cg.load_forebay_polygon(glacier=dem.polygon)
+    mask = dem.rasterize_poygons([forebay])
+    dem.Z[mask] = np.nan
+    dem.fill_crevasses(**fill_crevasses_args)
+    dem.Z[mask] = np.nan
+    # Add to results
     means.append(dem)
     sigma = np.sqrt(dem_sigmas[demtype]**2 + surface_sigma**2)
     sigmas.append(sigma)
