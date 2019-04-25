@@ -1,3 +1,4 @@
+# Images and figures
 svg/*.[jJ][pP][gG]
 svg-synth/*.[jJ][pP][gG]
 svg-synth/*.[tT][iI][fF]
@@ -7,5 +8,9 @@ motion/*.[jJ][pP][gG]
 motion/*.[pP][nN][gG]
 *-calib*
 *-ideal*
-points
-dems
+
+# Results
+points*
+tracks*
+results*
+dem_interpolant.pkl
