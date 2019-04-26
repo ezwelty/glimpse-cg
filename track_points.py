@@ -14,7 +14,9 @@ os.environ['OMP_NUM_THREADS'] = '1'
 cg.IMAGE_PATH = '/data/brinkerhoff/glimpse_data/timelapse' # Path to time-lapse images
 cg.FLAT_IMAGE_PATH = False # Whether path contains flat list of images
 parallel = 32 # Number of parallel processes, True = os.cpu_count(), False = disable parallel
-cylindrical = True
+dem_interpolant_path = 'dem_interpolant.pkl'
+points_path = 'points-cylindrical'
+tracks_path = 'tracks'
 
 # ---- Tracker heuristics ----
 # units: meters, days
@@ -74,12 +76,12 @@ observer_json = glimpse.helpers.read_json('observers.json',
 
 # ---- Load DEM interpolant ----
 
-dem_interpolant = glimpse.helpers.read_pickle('dem_interpolant.pkl')
+dem_interpolant = glimpse.helpers.read_pickle(dem_interpolant_path)
 dem_padding = 200 # m
 
 # ---- Track points ----
-start_index = 0
-for i_obs in range(len(observer_json))[start_index:]:
+
+for i_obs in range(0, len(observer_json)):
     # ---- Load observers ----
     # observers
     observers = []
@@ -105,15 +107,10 @@ for i_obs in range(len(observer_json))[start_index:]:
     # ---- Load track points ----
     t = min([observer.datetimes[0] for observer in observers])
     datestr = t.strftime('%Y%m%d')
-    basename = datestr + '-' + str(i_obs)
-    if cylindrical:
-        # ids, xy, observer_mask, vxyz, vxyz_sigma, flotation
-        params = glimpse.helpers.read_pickle(
-            os.path.join('points-cylindrical', basename + '.pkl'))
-    else:
-        # ids, xy, observer_mask, vrthz, vrthz_sigma, flotation
-        params = glimpse.helpers.read_pickle(
-            os.path.join('points-cartesian', basename + '.pkl'))
+    basename = str(i_obs)
+    # ids, xy, observer_mask, vrthz, vrthz_sigma, flotation
+    params = glimpse.helpers.read_pickle(
+        os.path.join(points_path, basename + '.pkl'))
     # ---- Load DEM ----
     # dem, dem_sigma
     dem, dem_sigma = dem_interpolant(t, return_sigma=True)
@@ -125,6 +122,7 @@ for i_obs in range(len(observer_json))[start_index:]:
     dem.crop_to_data()
     dem_sigma.crop_to_data()
     # ---- Compute motion models ----
+    cylindrical = 'vrthz' in params
     # motion_models
     time_unit = datetime.timedelta(days=1)
     m = len(params['xy'])
@@ -156,14 +154,9 @@ for i_obs in range(len(observer_json))[start_index:]:
     suffixes = ('f', 'fv', 'r', 'rv')
     directions = (1, 1, -1, -1)
     tracks = [None] * len(suffixes)
-    if cylindrical:
-        paths = [os.path.join(
-            'tracks-cylindrical', basename + '-' + suffix + '.pkl')
-            for suffix in suffixes]
-    else:
-        paths = [os.path.join(
-            'tracks-cartesian', basename + '-' + suffix + '.pkl')
-            for suffix in suffixes]
+    paths = [os.path.join(
+        tracks_path, basename + '-' + suffix + '.pkl')
+        for suffix in suffixes]
     is_file = [os.path.isfile(path) for path in paths]
     # Run forward and backward
     for i in (0, 2):

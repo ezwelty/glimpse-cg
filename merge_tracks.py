@@ -8,7 +8,7 @@ from merge_tracks_functions import *
 
 # Input
 tracks_path = 'tracks'
-points_path = 'points'
+points_path = 'points-cylindrical'
 labels = 'f', 'fv', 'r', 'rv'
 
 # Output
@@ -17,7 +17,7 @@ rasters_path = 'tracks-rasters'
 
 # Knobs & Switches
 flatten_function = flatten_tracks_ethan # Returns vxyz means, sigmas with dimensions [point] . [x | y | z]
-mean_datetimes = True # True: mean of times, False: middle of time range
+mean_midtimes = True # True: mean of times, False: middle of time range
 # Spatial median filter
 diagonal_neighbors = False # Whether to include diagonal neighbors
 min_observers = 2 # Median ignores neighbors with observers below min if any above min
@@ -31,11 +31,11 @@ exact_median_variance = False # Whether to use "exact" variance of median calcul
 # ids: Unique point ids (flat index of points in template raster)
 
 # Load tracks basenames
-# ['20040624-0', '20040625-1', ...]
 paths = glob.glob(os.path.join(tracks_path, '*.pkl'))
 basepaths = [glimpse.helpers.strip_path(path) for path in paths]
-basenames = np.unique([re.sub("-[^-]+$", '', path) for path in basepaths
-    if re.search('^[0-9]{8}-[0-9]+-.+', path) is not None])
+basenames = np.unique([re.sub(r"-[^-]+$", '', path) for path in basepaths
+    if re.search(r"[0-9]+-.+$", path) is not None])
+track_ids = [int(re.sub(r"^[0-9]+-", '', basename)) for basename in basenames]
 
 # Load template
 template = glimpse.Raster.read(os.path.join(points_path, 'template.tif'))
@@ -48,17 +48,16 @@ for basename in basenames:
     ids = np.union1d(ids, points['ids']).astype(int)
 
 # ---- Build arrays ----
-# xyi: [ x | y | id ]
-# datetimes: [ t ]
+# xyi: [ x | y | point_id ]
+# ti: [ t_start | t_stop | t_mid | track_id ]
 # means: [ point ] . [ t ] . [ vx | vy | vz ]
 # sigmas: [ point ] . [ t ] . [ vx_sigma | vy_sigma | vz_sigma ]
 # nobservers: [ point ] . [ t ]
 # flotation: [ point ] . [ t ]
 
 # Initialize arrays
-idx = range(len(basenames))
-datetimes = []
-shape = len(ids), len(idx), 3
+shape = len(ids), len(basenames), 3
+ti = np.full((len(basenames), 4), np.nan, dtype=np.object)
 means = np.full(shape, np.nan, dtype=np.float32)
 sigmas = means.copy()
 flotation = means[..., 0].copy()
@@ -77,12 +76,13 @@ for col, basename in enumerate(basenames):
     means[rows, col], sigmas[rows, col] = flatten_function(runs)
     flotation[rows, col] = points['flotation']
     nobservers[rows, col] = points['observer_mask'].sum(axis=1)
-    if mean_datetimes:
+    if mean_midtimes:
         # Midtime as mean
-        datetimes.append(origin + (runs['f'].datetimes - origin).mean())
+        midtime = origin + (runs['f'].datetimes - origin).mean()
     else:
         # Midtime as middle
-        datetimes.append(origin + (runs['f'].datetimes[[1, -1]] - origin).mean())
+        midtime = origin + (runs['f'].datetimes[[0, -1]] - origin).mean()
+    ti[col] = runs['f'].datetimes[0], runs['f'].datetimes[-1], midtime, track_ids[col]
 
 # Precompute spatial neighborhoods and masks
 ncols = template.shape[1]
@@ -145,9 +145,7 @@ for dim in range(means.shape[2]):
         fsigmas[mask, dim] = np.sqrt(np.nanmean(s**2, axis=1)[mask])
 
 # Write files
-datetimes = np.asarray(datetimes)
-glimpse.helpers.write_pickle(
-    datetimes, os.path.join(arrays_path, 'datetimes.pkl'))
+glimpse.helpers.write_pickle(ti, os.path.join(arrays_path, 'ti.pkl'))
 glimpse.helpers.write_pickle(fmeans, os.path.join(arrays_path, 'means.pkl'))
 glimpse.helpers.write_pickle(fsigmas, os.path.join(arrays_path, 'sigmas.pkl'))
 nobservers[np.isnan(means[..., 0])] = 0
@@ -159,9 +157,6 @@ glimpse.helpers.write_pickle(
 xy = glimpse.helpers.grid_to_points((template.X, template.Y))[ids]
 xyi = np.column_stack((xy, ids))
 glimpse.helpers.write_pickle(xyi, os.path.join(arrays_path, 'xyi.pkl'))
-np.savetxt(
-    fname=os.path.join(arrays_path, 'xyi.csv'), X=xyi,
-    delimiter=',', fmt='%d', header='x,y,id', comments='')
 
 # ---- Build rasters ----
 # [ y ] . [ x ] . [ t ]
@@ -175,7 +170,7 @@ raster.crop_to_data()
 rowcols = raster.xy_to_rowcol(xyi[:, 0:2], snap=True)
 
 # Rasterize arrays
-base = np.full(raster.shape + (len(datetimes), ), np.nan, dtype=np.float32)
+base = np.full(raster.shape + (len(basenames), ), np.nan, dtype=np.float32)
 for i, basename in enumerate(('vx', 'vy', 'vz')):
     base[rowcols[:, 0], rowcols[:, 1]] = means[..., i]
     glimpse.helpers.write_pickle(base, os.path.join(rasters_path, basename + '.pkl'))
@@ -194,7 +189,7 @@ raster.Z = raster.Z.astype(np.uint8)
 raster.write(os.path.join(rasters_path, 'template.tif'), crs=32606)
 
 # Write metadata
-glimpse.helpers.write_pickle(datetimes, os.path.join(rasters_path, 'datetimes.pkl'))
+glimpse.helpers.write_pickle(ti, os.path.join(rasters_path, 'ti.pkl'))
 glimpse.helpers.write_pickle(xyi, os.path.join(rasters_path, 'xyi.pkl'))
 
 # ---- Build strain rates ----

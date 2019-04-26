@@ -12,6 +12,9 @@ max_distance = 10e3 # m
 bed_sigma = 20 # m
 density_water = 1025 # kg / m^3
 density_ice = 916.7 # kg / m^3
+dem_interpolant_path = 'dem_interpolant.pkl'
+cartesian_path = 'points-cartesian'
+cylindrical_path = 'points-cylindrical'
 
 # ---- Load first image from each observer station ----
 # images
@@ -34,7 +37,7 @@ for observers in json:
 
 # ---- Load DEM interpolant ----
 
-dem_interpolant = glimpse.helpers.read_pickle('dem_interpolant.pkl')
+dem_interpolant = glimpse.helpers.read_pickle(dem_interpolant_path)
 
 # ---- Load canonical velocities (cartesian) ----
 # vx, vx_sigma, vy, vy_sigma
@@ -75,12 +78,12 @@ track_ids = np.ravel_multi_index(np.nonzero(mask), track_template.shape)
 # Write to file
 track_template.Z &= mask
 track_template.Z = track_template.Z.astype(np.uint8)
-track_template.write(os.path.join('points-cartesian', 'template.tif'), crs=32606)
-track_template.write(os.path.join('points-cylindrical', 'template.tif'), crs=32606)
+track_template.write(os.path.join(cartesian_path, 'template.tif'), crs=32606)
+track_template.write(os.path.join(cylindrical_path, 'template.tif'), crs=32606)
 
 # ---- For each observer ----
 
-for obs in range(len(start_images)):
+for obs in range(0, len(start_images)):
     print(obs)
     images = start_images[obs]
     # Check within DEM interpolant bounds
@@ -154,19 +157,19 @@ for obs in range(len(start_images)):
     dh = hmax - hf
     flotation = scipy.stats.norm().cdf(-dh.mean / dh.sigma)
     # ---- Save parameters to file ----
-    basename = t.strftime('%Y%m%d') + '-' + str(obs) + '.pkl'
+    basename = str(obs) + '.pkl'
     # ids, xy, observer_mask
     # flotation: Probability of flotation
     # vxyz, vxyz_sigma (cartesian)
     glimpse.helpers.write_pickle(
         dict(ids=ids, xy=xy, observer_mask=obsmask, flotation=flotation,
         vxyz=vxyz, vxyz_sigma=vxyz_sigma),
-        path=os.path.join('points-cartesian', basename))
+        path=os.path.join(cartesian_path, basename))
     # vrthz, vrthz_sigma (cylindrical)
     glimpse.helpers.write_pickle(
         dict(ids=ids, xy=xy, observer_mask=obsmask, flotation=flotation,
         vrthz=vrthz, vrthz_sigma=vrthz_sigma),
-        path=os.path.join('points-cylindrical', basename))
+        path=os.path.join(cylindrical_path, basename))
 
 # ---- Plotting ----
 

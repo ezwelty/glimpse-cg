@@ -13,4 +13,4 @@ motion/*.[pP][nN][gG]
 points*
 tracks*
 results*
-dem_interpolant.pkl
+dem_interpolant*

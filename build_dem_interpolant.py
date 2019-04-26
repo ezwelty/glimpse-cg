@@ -9,10 +9,11 @@ grid_size = 20 # m
 zlim = (1, np.inf) # m
 fill_crevasses_args = dict(
     maximum=dict(size=5), # 100 m
-    gaussian=dict(sigma=5), # 100 m (68%)
+    gaussian=dict(sigma=5), # 200 m (68%)
     mask=lambda x: ~np.isnan(x),
     fill=True)
 max_distance = 10e3 # m
+dem_interpolant_path = 'dem_interpolant.pkl'
 
 # ---- Build DEM template ----
 
@@ -127,4 +128,4 @@ dem_interpolant = glimpse.RasterInterpolant(means=means, sigmas=sigmas,
     x=[dem.datetime for dem in means])
 
 # Write to file
-glimpse.helpers.write_pickle(dem_interpolant, 'dem_interpolant.pkl')
+glimpse.helpers.write_pickle(dem_interpolant, dem_interpolant_path)
