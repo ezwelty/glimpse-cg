@@ -4,6 +4,7 @@ from glimpse.imports import (datetime, np, os, collections)
 root = '/volumes/science/data/columbia'
 cg.IMAGE_PATH = os.path.join(root, 'timelapse')
 
+base_dem_path = os.path.join(root, 'dem-ifsar-merged/data/ifsar.tif')
 surface_sigma = 3 # m, surface roughness
 grid_size = 20 # m
 zlim = (1, np.inf) # m
@@ -93,6 +94,13 @@ dem_keys = [
     ('20160820', 'arcticdem')]
 dem_keys.sort(key=lambda x: x[0])
 
+# ---- Prepare base DEM ----
+
+temp = glimpse.Raster.read(base_dem_path)
+z = temp.sample(dem_points, order=1, bounds_error=False).reshape(dem_template.shape)
+base_dem = glimpse.Raster(z, x=dem_template.xlim, y=dem_template.ylim)
+base_mask = ~dem.rasterize_poygons([cg.Glacier()])
+
 # ---- Build DEM interpolant ----
 
 # Compute means and sigmas
@@ -115,8 +123,11 @@ for datestr, demtype in dem_keys:
     # Mask forebay
     forebay = cg.load_forebay_polygon(glacier=dem.polygon)
     mask = dem.rasterize_poygons([forebay])
-    dem.Z[mask] = np.nan
+    dem.Z[mask | base_mask] = np.nan
     dem.fill_crevasses(**fill_crevasses_args)
+    dem.Z[mask | base_mask] = np.nan
+    # Use base DEM outside glacier
+    dem.Z[base_mask] = base_dem.Z[base_mask]
     dem.Z[mask] = np.nan
     # Add to results
     means.append(dem)
